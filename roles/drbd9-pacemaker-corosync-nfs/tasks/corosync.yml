@@ -1,0 +1,60 @@
+---
+- name: Создать ключ Corosync на node1
+  ansible.builtin.command:
+    argv:
+      - corosync-keygen
+      - -l
+  args:
+    creates: /etc/corosync/authkey
+  run_once: true
+  delegate_to: node1
+  no_log: true
+
+- name: Прочитать ключ Corosync с node1
+  ansible.builtin.slurp:
+    src: /etc/corosync/authkey
+  register: corosync_authkey
+  run_once: true
+  delegate_to: node1
+  no_log: true
+
+- name: Скопировать ключ Corosync на узлы
+  ansible.builtin.copy:
+    content: "{{ corosync_authkey.content | b64decode }}"
+    dest: /etc/corosync/authkey
+    owner: root
+    group: root
+    mode: "0400"
+  no_log: true
+
+- name: Настроить Corosync
+  ansible.builtin.template:
+    src: corosync.conf.j2
+    dest: /etc/corosync/corosync.conf
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Проверить конфигурацию Corosync
+  ansible.builtin.command:
+    argv:
+      - corosync
+      - -t
+  changed_when: false
+
+- name: Запустить Corosync
+  ansible.builtin.systemd_service:
+    name: corosync
+    enabled: true
+    state: started
+
+- name: Дождаться quorum Corosync
+  ansible.builtin.command:
+    argv:
+      - corosync-quorumtool
+      - -s
+  register: corosync_quorum
+  changed_when: false
+  retries: 20
+  delay: 3
+  until: "'Quorate:          Yes' in corosync_quorum.stdout"

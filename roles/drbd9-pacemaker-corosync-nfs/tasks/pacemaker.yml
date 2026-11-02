@@ -1,0 +1,119 @@
+---
+# Pacemaker запускается на всех трёх узлах
+# node3 участвует в управлении кластером, но позже получит запрет на запуск NFS
+- name: Запустить Pacemaker
+  ansible.builtin.systemd_service:
+    name: pacemaker
+    enabled: true
+    state: started
+
+- name: Дождаться запуска SBD
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - is-active
+      - sbd
+  register: sbd_status
+  changed_when: false
+  retries: 10
+  delay: 2
+  until: sbd_status.stdout == 'active'
+
+- name: Дождаться запуска Pacemaker
+  ansible.builtin.command:
+    argv:
+      - pcs
+      - status
+  register: pacemaker_status
+  changed_when: false
+  retries: 20
+  delay: 3
+  until: pacemaker_status.rc == 0
+  run_once: true
+  delegate_to: node1
+
+- name: Получить свойства Pacemaker
+  ansible.builtin.command:
+    argv:
+      - pcs
+      - property
+      - config
+      - --all
+  register: pacemaker_properties
+  changed_when: false
+  run_once: true
+  delegate_to: node1
+
+# Fencing запрещает запуск ресурсов на другом узле, пока старый узел
+# не будет гарантированно изолирован через SBD и watchdog
+- name: Включить fencing
+  ansible.builtin.command:
+    argv:
+      - pcs
+      - property
+      - set
+      - fencing-enabled=true
+  changed_when: true
+  when: pacemaker_properties.stdout is not regex('fencing-enabled[=:]\s*true')
+  run_once: true
+  delegate_to: node1
+
+# Pacemaker должен ждать дольше, чем SBD требуется для перезагрузки узла.
+# Оба значения задаются в defaults/main.yml.
+- name: Настроить ожидание watchdog
+  ansible.builtin.command:
+    argv:
+      - pcs
+      - property
+      - set
+      - "fencing-watchdog-timeout={{ ha_nfs_sbd_recovery_timeout }}s"
+  changed_when: true
+  when: >-
+    pacemaker_properties.stdout is not
+    regex(
+      'fencing-watchdog-timeout[=:]\s*' ~
+      (ha_nfs_sbd_recovery_timeout | string) ~ 's'
+    )
+  run_once: true
+  delegate_to: node1
+
+# При потере большинства голосов Pacemaker останавливает ресурсы.
+# Это не позволяет двум изолированным частям кластера одновременно запустить NFS.
+- name: Останавливать ресурсы без quorum
+  ansible.builtin.command:
+    argv:
+      - pcs
+      - property
+      - set
+      - no-quorum-policy=stop
+  changed_when: true
+  when: pacemaker_properties.stdout is not regex('no-quorum-policy[=:]\s*stop')
+  run_once: true
+  delegate_to: node1
+
+- name: Получить параметры ресурсов по умолчанию
+  ansible.builtin.command:
+    argv:
+      - pcs
+      - resource
+      - defaults
+      - config
+  register: pacemaker_resource_defaults
+  changed_when: false
+  run_once: true
+  delegate_to: node1
+
+# После восстановления старого узла ресурсы остаются там, где уже работают.
+# Это предотвращает ненужный автоматический возврат NFS и повторный простой.
+- name: Запретить автоматический возврат ресурсов
+  ansible.builtin.command:
+    argv:
+      - pcs
+      - resource
+      - defaults
+      - update
+      - resource-stickiness=200
+  changed_when: true
+  when: "'resource-stickiness=200' not in pacemaker_resource_defaults.stdout"
+  run_once: true
+  delegate_to: node1

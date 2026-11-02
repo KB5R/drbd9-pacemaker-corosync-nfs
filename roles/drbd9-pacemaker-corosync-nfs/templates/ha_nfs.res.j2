@@ -1,0 +1,69 @@
+resource ha_nfs {
+  protocol C;
+
+  options {
+    auto-promote no;
+    quorum majority;
+    on-no-quorum suspend-io;
+    on-no-data-accessible suspend-io;
+  }
+
+  net {
+    allow-two-primaries no;
+    cram-hmac-alg sha256;
+    shared-secret "{{ ha_nfs_drbd_shared_secret }}";
+  }
+
+  on node1 {
+    node-id 0;
+    address ipv4 {{ hostvars['node1'].ansible_host }}:7788;
+
+    volume 0 {
+      device minor 0;
+      disk /dev/vg_ha_nfs/nfs_state;
+      meta-disk internal;
+    }
+
+    volume 1 {
+      device minor 1;
+      disk /dev/vg_ha_nfs/nfs_data;
+      meta-disk internal;
+    }
+  }
+
+  on node2 {
+    node-id 1;
+    address ipv4 {{ hostvars['node2'].ansible_host }}:7788;
+
+    volume 0 {
+      device minor 0;
+      disk /dev/vg_ha_nfs/nfs_state;
+      meta-disk internal;
+    }
+
+    volume 1 {
+      device minor 1;
+      disk /dev/vg_ha_nfs/nfs_data;
+      meta-disk internal;
+    }
+  }
+
+  on node3 {
+    node-id 2;
+    address ipv4 {{ hostvars['node3'].ansible_host }}:7788;
+
+    volume 0 {
+      device minor 0;
+      disk none;
+    }
+
+    volume 1 {
+      device minor 1;
+      disk none;
+    }
+  }
+
+  connection-mesh {
+    hosts node1 node2 node3;
+  }
+}

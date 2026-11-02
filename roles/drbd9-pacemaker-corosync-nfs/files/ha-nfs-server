@@ -1,0 +1,20 @@
+#!/bin/sh
+
+case "$1" in
+  start)
+    systemctl start nfs-server
+    ;;
+  stop)
+    systemctl stop nfs-server
+    ;;
+  restart)
+    systemctl restart nfs-server
+    ;;
+  status)
+    systemctl is-active --quiet nfs-server && exit 0
+    exit 3
+    ;;
+  *)
+    exit 2
+    ;;
+esac

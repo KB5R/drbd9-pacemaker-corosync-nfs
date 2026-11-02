@@ -1,0 +1,17 @@
+---
+ha_nfs_cluster_packages:
+  - kernel-modules-drbd9-6.12
+  - drbd-utils
+  - drbd-utils-pacemaker
+  - corosync
+  - pacemaker
+  - pacemaker-cli
+  - pcs
+  - sbd
+  - resource-agents
+  - resource-agents-nfs
+  - nfs-server
+  - nfs-utils
+  - rpcbind
+  - xfsprogs
+  - lvm2

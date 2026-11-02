@@ -1,0 +1,132 @@
+---
+- name: Проверить управление DRBD через Pacemaker
+  ansible.builtin.command:
+    argv:
+      - pcs
+      - resource
+      - config
+      - p_drbd_nfs
+  register: drbd_managed_by_pacemaker
+  changed_when: false
+  failed_when: false
+  run_once: true
+  delegate_to: node1
+
+- name: Получить состояние DRBD
+  ansible.builtin.command:
+    argv:
+      - drbdadm
+      - status
+      - ha_nfs
+  register: drbd_sync_status
+  changed_when: false
+  failed_when: false
+  run_once: true
+  delegate_to: node1
+
+- name: Определить первоначальную подготовку файловых систем
+  ansible.builtin.set_fact:
+    initialize_filesystems: >-
+      {{ drbd_managed_by_pacemaker.rc != 0 and drbd_sync_status.rc == 0 }}
+
+- name: Проверить завершение синхронизации DRBD
+  ansible.builtin.assert:
+    that:
+      - "'role:Primary' in drbd_sync_status.stdout"
+      - drbd_sync_status.stdout.count('peer-disk:UpToDate') == 2
+      - "'Inconsistent' not in drbd_sync_status.stdout"
+      - "'Outdated' not in drbd_sync_status.stdout"
+      - "'DUnknown' not in drbd_sync_status.stdout"
+      - "'Connecting' not in drbd_sync_status.stdout"
+      - "'SyncSource' not in drbd_sync_status.stdout"
+      - "'SyncTarget' not in drbd_sync_status.stdout"
+    fail_msg: DRBD ещё не синхронизирован. Повторите step2 после состояния UpToDate.
+  run_once: true
+  when: initialize_filesystems
+
+- name: Создать файловую систему служебного тома NFS
+  community.general.filesystem:
+    dev: /dev/drbd/by-res/ha_nfs/0
+    fstype: "{{ ha_nfs_filesystem }}"
+    force: false
+  when:
+    - initialize_filesystems
+    - inventory_hostname == 'node1'
+
+- name: Создать файловую систему тома данных NFS
+  community.general.filesystem:
+    dev: /dev/drbd/by-res/ha_nfs/1
+    fstype: "{{ ha_nfs_filesystem }}"
+    force: false
+  when:
+    - initialize_filesystems
+    - inventory_hostname == 'node1'
+
+- name: Создать каталог служебного тома NFS
+  ansible.builtin.file:
+    path: /srv/ha-nfs/state
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: inventory_hostname in groups['drbd_nodes']
+
+- name: Создать каталог тома данных NFS
+  ansible.builtin.file:
+    path: /srv/ha-nfs/data
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ ha_nfs_data_mode }}"
+  when: inventory_hostname in groups['drbd_nodes']
+
+- name: Подготовить общее состояние NFS
+  when:
+    - initialize_filesystems
+    - inventory_hostname == 'node1'
+  block:
+    - name: Временно смонтировать служебный том NFS
+      ansible.posix.mount:
+        path: /srv/ha-nfs/state
+        src: /dev/drbd/by-res/ha_nfs/0
+        fstype: "{{ ha_nfs_filesystem }}"
+        state: ephemeral
+
+    - name: Создать каталог состояния NFS
+      ansible.builtin.file:
+        path: /srv/ha-nfs/state/nfs_info
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+  always:
+    - name: Размонтировать служебный том NFS
+      ansible.posix.mount:
+        path: /srv/ha-nfs/state
+        state: unmounted
+
+- name: Понизить node1 до DRBD Secondary
+  ansible.builtin.command:
+    argv:
+      - drbdadm
+      - secondary
+      - ha_nfs
+  changed_when: true
+  when:
+    - initialize_filesystems
+    - inventory_hostname == 'node1'
+
+- name: Остановить ресурс DRBD
+  ansible.builtin.command:
+    argv:
+      - drbdadm
+      - down
+      - ha_nfs
+  changed_when: true
+  when: initialize_filesystems
+
+- name: Отключить системный автозапуск DRBD
+  ansible.builtin.systemd_service:
+    name: drbd
+    enabled: false

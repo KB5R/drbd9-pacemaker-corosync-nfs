@@ -1,0 +1,39 @@
+---
+- name: Создать службу загрузки softdog
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/ha-nfs-watchdog.service
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Load softdog modules
+      After=systemd-modules-load.service
+      Before=sbd.service
+
+      [Service]
+      Type=oneshot
+      ExecStart=/sbin/modprobe softdog
+      RemainAfterExit=yes
+
+      [Install]
+      RequiredBy=sbd.service
+
+- name: Запустить softdog
+  ansible.builtin.systemd_service:
+    name: ha-nfs-watchdog.service
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Проверить устройство watchdog
+  ansible.builtin.stat:
+    path: /dev/watchdog
+  register: watchdog_device
+
+- name: Убедиться в наличии watchdog
+  ansible.builtin.assert:
+    that:
+      - watchdog_device.stat.exists | default(false)
+      - watchdog_device.stat.ischr | default(false)
+    fail_msg: Устройство /dev/watchdog не найдено.

@@ -1,0 +1,135 @@
+---
+- name: Настроить ресурс DRBD
+  ansible.builtin.template:
+    src: ha_nfs.res.j2
+    dest: /etc/drbd.d/ha_nfs.res
+    owner: root
+    group: root
+    mode: "0600"
+  diff: false
+
+- name: Проверить конфигурацию DRBD
+  ansible.builtin.command:
+    argv:
+      - drbdadm
+      - dump
+      - ha_nfs
+  changed_when: false
+
+- name: Проверить состояние ресурса DRBD
+  ansible.builtin.command:
+    argv:
+      - drbdadm
+      - status
+      - ha_nfs
+  register: drbd_status
+  changed_when: false
+  failed_when: false
+
+- name: Подготовить DRBD metadata
+  when: inventory_hostname in groups['drbd_nodes']
+  block:
+    - name: Проверить metadata тома состояния
+      ansible.builtin.command:
+        argv:
+          - drbdmeta
+          - "0"
+          - v09
+          - /dev/vg_ha_nfs/nfs_state
+          - internal
+          - dstate
+      register: drbd_state_metadata
+      changed_when: false
+      failed_when: false
+      when: drbd_status.rc != 0
+
+    - name: Проверить metadata тома данных
+      ansible.builtin.command:
+        argv:
+          - drbdmeta
+          - "1"
+          - v09
+          - /dev/vg_ha_nfs/nfs_data
+          - internal
+          - dstate
+      register: drbd_data_metadata
+      changed_when: false
+      failed_when: false
+      when: drbd_status.rc != 0
+
+    - name: Проверить состояние DRBD metadata
+      ansible.builtin.assert:
+        that:
+          - drbd_state_metadata.rc == drbd_data_metadata.rc
+        fail_msg: DRBD metadata существует только на одном из томов.
+      when: drbd_status.rc != 0
+
+    - name: Создать DRBD metadata
+      ansible.builtin.command:
+        argv:
+          - drbdadm
+          - create-md
+          - ha_nfs
+      register: drbd_metadata_created
+      changed_when: true
+      when:
+        - drbd_status.rc != 0
+        - (drbd_state_metadata.rc | default(0)) != 0
+
+- name: Поднять ресурс DRBD
+  ansible.builtin.command:
+    argv:
+      - drbdadm
+      - up
+      - ha_nfs
+  changed_when: true
+  when: drbd_status.rc != 0
+
+- name: Дождаться соединения узлов DRBD
+  ansible.builtin.command:
+    argv:
+      - drbdadm
+      - status
+      - ha_nfs
+  register: drbd_connected
+  changed_when: false
+  retries: 20
+  delay: 3
+  until:
+    - drbd_connected.rc == 0
+    - "'node2 role:Secondary' in drbd_connected.stdout"
+    - "'node3 role:Secondary' in drbd_connected.stdout"
+    - "'Connecting' not in drbd_connected.stdout"
+    - "'StandAlone' not in drbd_connected.stdout"
+    - "'Unconnected' not in drbd_connected.stdout"
+    - "'NetworkFailure' not in drbd_connected.stdout"
+  run_once: true
+  delegate_to: node1
+  when: hostvars['node1'].drbd_status.rc != 0
+
+- name: Назначить первоначальный DRBD Primary
+  ansible.builtin.command:
+    argv:
+      - drbdadm
+      - primary
+      - --force
+      - ha_nfs
+  changed_when: true
+  run_once: true
+  delegate_to: node1
+  when: hostvars['node1'].drbd_status.rc != 0
+
+- name: Показать дальнейшие действия
+  ansible.builtin.debug:
+    msg: |
+      Шаг 1 завершён. DRBD запущен, первоначальная синхронизация началась.
+
+      Проверяйте состояние на node1:
+        watch -n 2 drbdadm status ha_nfs
+
+      Переходите к шагу 2, когда оба тома на node1 и node2 будут UpToDate,
+      а в выводе не останется состояний Inconsistent, Outdated или SyncTarget.
+
+      Следующая команда:
+        ansible-playbook playbook.yml --tags step2
+  run_once: true

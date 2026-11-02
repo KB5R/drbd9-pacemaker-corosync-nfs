@@ -1,0 +1,36 @@
+---
+- name: Подтвердить инициализацию диска
+  ansible.builtin.assert:
+    that:
+      - ha_nfs_storage_initialize | bool
+    fail_msg: Запустите step1 с -e ha_nfs_storage_initialize=true.
+
+- name: Проверить диск данных
+  ansible.builtin.stat:
+    path: "{{ ha_nfs_data_disk }}"
+    follow: true
+  register: data_disk
+  failed_when: not (data_disk.stat.isblk | default(false))
+
+- name: Создать физический том и группу томов LVM
+  community.general.lvg:
+    vg: vg_ha_nfs
+    pvs:
+      - "{{ ha_nfs_data_disk }}"
+    state: present
+
+- name: Создать том состояния NFS
+  community.general.lvol:
+    vg: vg_ha_nfs
+    lv: nfs_state
+    size: "{{ ha_nfs_state_lv_size }}"
+    shrink: false
+    state: present
+
+- name: Создать том данных NFS
+  community.general.lvol:
+    vg: vg_ha_nfs
+    lv: nfs_data
+    size: "{{ ha_nfs_data_lv_size }}"
+    shrink: false
+    state: present

@@ -1,0 +1,46 @@
+---
+# sbd.yml настраивает механизм самозащиты узла
+# Если узел теряет quorum или Pacemaker перестаёт отвечать,
+# SBD прекращает обслуживать watchdog, после чего softdog перезагружает узел
+- name: Проверить таймауты SBD
+  ansible.builtin.assert:
+    that:
+      - (ha_nfs_sbd_recovery_timeout | int) > (ha_nfs_sbd_watchdog_timeout | int)
+    fail_msg: Таймаут Pacemaker должен быть больше таймаута SBD.
+
+- name: Настроить SBD
+  ansible.builtin.copy:
+    dest: /etc/sysconfig/sbd
+    owner: root
+    group: root
+    mode: "0600"
+    content: |
+      SBD_DEVICE=""
+      SBD_PACEMAKER=yes
+      SBD_STARTMODE=always
+      SBD_DELAY_START=no
+      SBD_WATCHDOG_DEV=/dev/watchdog
+      SBD_WATCHDOG_TIMEOUT={{ ha_nfs_sbd_watchdog_timeout }}
+      SBD_TIMEOUT_ACTION=flush,reboot
+      SBD_MOVE_TO_ROOT_CGROUP=auto
+      SBD_SYNC_RESOURCE_STARTUP=yes
+      SBD_OPTS=
+
+# SBD_DEVICE="" - Общий диск SBD не используется
+# SBD_PACEMAKER=yes - Включает наблюдение за Pacemaker и состоянием кластера
+# SBD_STARTMODE=always - Разрешает SBD запускаться после каждого старта узла
+# SBD_DELAY_START=no - Не добавляет задержку перед запуском SBD
+# SBD_WATCHDOG_DEV=/dev/watchdog - Устройство watchdog, которое использует SBD
+# SBD_WATCHDOG_TIMEOUT - Таймаут самоперезагрузки из defaults/main.yml
+# SBD_TIMEOUT_ACTION=flush,reboot - Сбрасывает буферы и перезагружает узел
+# SBD_MOVE_TO_ROOT_CGROUP=auto - Автоматически настраивает cgroup для SBD
+# SBD_SYNC_RESOURCE_STARTUP=yes - Не позволяет Pacemaker запускать ресурсы без SBD
+# SBD_OPTS= - Дополнительные параметры запуска отсутствуют
+
+- name: Включить SBD
+  ansible.builtin.systemd_service:
+    name: sbd
+    enabled: true
+
+# SBD не запускаем вручную
+# Он запускается раньше Corosync и Pacemaker через systemd-зависимости

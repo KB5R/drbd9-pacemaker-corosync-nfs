@@ -1,0 +1,143 @@
+---
+- name: Проверить ресурс DRBD в Pacemaker
+  ansible.builtin.command:
+    argv:
+      - pcs
+      - resource
+      - config
+      - p_drbd_nfs
+  register: pacemaker_drbd_resource
+  changed_when: false
+  failed_when: false
+  run_once: true
+  delegate_to: node1
+
+- name: Получить ограничения Pacemaker
+  ansible.builtin.command:
+    argv:
+      - pcs
+      - constraint
+      - config
+      - --full
+  register: pacemaker_constraints
+  changed_when: false
+  run_once: true
+  delegate_to: node1
+
+# Maintenance mode не позволяет Pacemaker запускать незавершённую конфигурацию.
+- name: Включить режим обслуживания Pacemaker
+  ansible.builtin.command:
+    argv:
+      - pcs
+      - property
+      - set
+      - maintenance-mode=true
+  changed_when: true
+  when: >-
+    pacemaker_drbd_resource.rc != 0 or
+    'location-p_drbd_nfs-clone' not in pacemaker_constraints.stdout
+  run_once: true
+  delegate_to: node1
+
+# Promotable-ресурс запускает DRBD на трёх узлах,
+# но одновременно разрешает только один Primary.
+- name: Создать promotable-ресурс DRBD
+  ansible.builtin.command:
+    argv:
+      - pcs
+      - resource
+      - create
+      - p_drbd_nfs
+      - ocf:linbit:drbd
+      - drbd_resource=ha_nfs
+      - op
+      - start
+      - interval=0s
+      - timeout=240s
+      - op
+      - stop
+      - interval=0s
+      - timeout=240s
+      - op
+      - monitor
+      - interval=29s
+      - timeout=30s
+      - role=Promoted
+      - op
+      - monitor
+      - interval=31s
+      - timeout=30s
+      - role=Unpromoted
+      - promotable
+      - promoted-max=1
+      - promoted-node-max=1
+      - clone-max=3
+      - clone-node-max=1
+      - notify=true
+  changed_when: true
+  when: pacemaker_drbd_resource.rc != 0
+  run_once: true
+  delegate_to: node1
+
+# node3 не имеет backing disk и используется только как DRBD tiebreaker.
+# Ограничение запрещает Pacemaker повышать его до Primary.
+- name: Запретить DRBD Primary на node3
+  ansible.builtin.command:
+    argv:
+      - pcs
+      - constraint
+      - location
+      - p_drbd_nfs-clone
+      - rule
+      - role=Promoted
+      - score=-INFINITY
+      - constraint-id=location-p_drbd_nfs-clone
+      - "#uname"
+      - eq
+      - node3
+  changed_when: true
+  when: "'location-p_drbd_nfs-clone' not in pacemaker_constraints.stdout"
+  run_once: true
+  delegate_to: node1
+
+- name: Проверить конфигурацию Pacemaker
+  ansible.builtin.command:
+    argv:
+      - crm_verify
+      - -L
+      - -V
+  changed_when: false
+  run_once: true
+  delegate_to: node1
+
+- name: Выключить режим обслуживания Pacemaker
+  ansible.builtin.command:
+    argv:
+      - pcs
+      - property
+      - set
+      - maintenance-mode=false
+  changed_when: true
+  when: >-
+    pacemaker_drbd_resource.rc != 0 or
+    'location-p_drbd_nfs-clone' not in pacemaker_constraints.stdout or
+    pacemaker_properties.stdout is regex('maintenance-mode[=:]\s*true')
+  run_once: true
+  delegate_to: node1
+
+- name: Дождаться запуска DRBD в Pacemaker
+  ansible.builtin.command:
+    argv:
+      - pcs
+      - resource
+      - status
+      - p_drbd_nfs-clone
+  register: pacemaker_drbd_status
+  changed_when: false
+  retries: 40
+  delay: 5
+  until:
+    - pacemaker_drbd_status.rc == 0
+    - "'Promoted' in pacemaker_drbd_status.stdout"
+  run_once: true
+  delegate_to: node1

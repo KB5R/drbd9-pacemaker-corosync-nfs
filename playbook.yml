@@ -1,0 +1,9 @@
+---
+- name: Развернуть отказоустойчивый NFS-кластер
+  hosts: cluster
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+
+  roles:
+    - role: drbd9-pacemaker-corosync-nfs

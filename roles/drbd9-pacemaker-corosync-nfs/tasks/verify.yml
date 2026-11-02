@@ -1,0 +1,78 @@
+---
+- name: Получить итоговое состояние Pacemaker
+  ansible.builtin.command:
+    argv:
+      - pcs
+      - status
+      - --full
+  register: final_pacemaker_status
+  changed_when: false
+  run_once: true
+  delegate_to: node1
+
+- name: Проверить итоговое состояние Pacemaker
+  ansible.builtin.assert:
+    that:
+      - "'Promoted' in final_pacemaker_status.stdout"
+      - final_pacemaker_status.stdout.count('Started') >= 5
+      - "'UNCLEAN' not in final_pacemaker_status.stdout"
+      - "'FAILED' not in final_pacemaker_status.stdout"
+      - "'Failed Resource Actions:' not in final_pacemaker_status.stdout"
+    fail_msg: Pacemaker сообщает об ошибке. Проверьте pcs status --full.
+  run_once: true
+
+- name: Проверить quorum Corosync
+  ansible.builtin.command:
+    argv:
+      - corosync-quorumtool
+      - -s
+  register: final_corosync_status
+  changed_when: false
+  failed_when: "'Quorate:          Yes' not in final_corosync_status.stdout"
+
+- name: Проверить DRBD
+  ansible.builtin.command:
+    argv:
+      - drbdadm
+      - status
+      - ha_nfs
+  register: final_drbd_status
+  changed_when: false
+
+- name: Убедиться в исправном состоянии DRBD
+  ansible.builtin.assert:
+    that:
+      - "'Inconsistent' not in final_drbd_status.stdout"
+      - "'Outdated' not in final_drbd_status.stdout"
+      - "'DUnknown' not in final_drbd_status.stdout"
+      - "'Connecting' not in final_drbd_status.stdout"
+
+- name: Проверить VIP
+  ansible.builtin.command:
+    argv:
+      - pcs
+      - resource
+      - status
+      - p_nfs_vip
+  register: final_vip_status
+  changed_when: false
+  failed_when: >-
+    final_vip_status.rc != 0 or
+    'Started' not in final_vip_status.stdout
+  run_once: true
+  delegate_to: node1
+
+- name: Показать результат развёртывания
+  ansible.builtin.debug:
+    msg: |
+      Шаг 2 завершён. HA NFS-кластер запущен.
+
+      Состояние кластера:
+        pcs status --full
+
+      Проверка DRBD:
+        drbdadm status ha_nfs
+
+      Подключение с NFS-клиента:
+        mount -t nfs4 {{ ha_nfs_vip }}:/ /mnt/ha-nfs
+  run_once: true

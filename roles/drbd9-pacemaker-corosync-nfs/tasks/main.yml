@@ -1,0 +1,67 @@
+---
+- name: Установить пакеты
+  ansible.builtin.import_tasks: packages.yml
+  tags:
+    - never
+    - step1
+
+- name: Проверить диск хранения
+  ansible.builtin.import_tasks: storage.yml
+  when: inventory_hostname in groups['drbd_nodes']
+  tags:
+    - never
+    - step1
+
+- name: Настроить DRBD
+  ansible.builtin.import_tasks: drbd.yml
+  tags:
+    - never
+    - step1
+
+- name: Создать файловые системы
+  ansible.builtin.import_tasks: filesystem.yml
+  tags:
+    - never
+    - step2
+
+- name: Настроить watchdog
+  ansible.builtin.import_tasks: watchdog.yml
+  tags:
+    - never
+    - step2
+
+- name: Настроить SBD
+  ansible.builtin.import_tasks: sbd.yml
+  tags:
+    - never
+    - step2
+
+- name: Настроить Corosync
+  ansible.builtin.import_tasks: corosync.yml
+  tags:
+    - never
+    - step2
+
+- name: Настроить Pacemaker
+  ansible.builtin.import_tasks: pacemaker.yml
+  tags:
+    - never
+    - step2
+
+- name: Настроить ресурс DRBD в Pacemaker
+  ansible.builtin.import_tasks: resources.yml
+  tags:
+    - never
+    - step2
+
+- name: Настроить NFS и VIP
+  ansible.builtin.import_tasks: nfs.yml
+  tags:
+    - never
+    - step2
+
+- name: Проверить кластер
+  ansible.builtin.import_tasks: verify.yml
+  tags:
+    - never
+    - step2

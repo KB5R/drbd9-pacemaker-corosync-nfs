@@ -1,0 +1,37 @@
+totem {
+  version: 2
+  cluster_name: ha-nfs
+  transport: knet
+  crypto_cipher: aes256
+  crypto_hash: sha256
+}
+
+nodelist {
+  node {
+    name: node1
+    nodeid: 1
+    ring0_addr: {{ hostvars['node1'].ansible_host }}
+  }
+
+  node {
+    name: node2
+    nodeid: 2
+    ring0_addr: {{ hostvars['node2'].ansible_host }}
+  }
+
+  node {
+    name: node3
+    nodeid: 3
+    ring0_addr: {{ hostvars['node3'].ansible_host }}
+  }
+}
+
+quorum {
+  provider: corosync_votequorum
+  expected_votes: 3
+}
+
+logging {
+  to_syslog: yes
+  timestamp: on
+}

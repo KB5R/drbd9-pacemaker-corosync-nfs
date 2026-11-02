@@ -1,0 +1,30 @@
+---
+ha_nfs_state_lv_size: 1g
+ha_nfs_data_lv_size: 48g
+# Тут все просто ha_nfs_state_lv_size - это для служебного состояние NFS
+# ha_nfs_data_lv_size - ну это data все понятно
+
+ha_nfs_drbd_shared_secret: "b4fd81990dc061716dfe18f8a8c1548669b1096a8e64696b"
+# Общий секрет для аутентификации узлов DRBD
+
+# Разрешение на первоначальное создание LVM и DRBD metadata
+ha_nfs_storage_initialize: false
+
+ha_nfs_filesystem: xfs
+# Указываем filesystem для наших разделов
+
+# МIP, через который NFS доступен клиентам
+ha_nfs_vip: 192.168.88.200
+
+# Сеть, которой разрешено подключаться к NFS export
+ha_nfs_clients: 192.168.88.0/24
+
+# Права корневого каталога общего NFS-хранилища
+ha_nfs_data_mode: "0777"
+
+# Через сколько секунд SBD перезагрузит узел, который перестал обслуживать watchdog
+ha_nfs_sbd_watchdog_timeout: 30
+
+# Сколько Pacemaker ждёт fencing перед запуском ресурсов на другом узле
+# Значение должно быть больше ha_nfs_sbd_watchdog_timeout
+ha_nfs_sbd_recovery_timeout: 60
