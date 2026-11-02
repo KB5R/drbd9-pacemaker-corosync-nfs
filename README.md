@@ -51,6 +51,11 @@ Corosync предоставляет членство и quorum. Pacemaker упр
 .
 ├── ansible.cfg
 ├── playbook.yml
+├── inventory/
+│   ├── inventory.ini
+│   └── host_vars/
+│       ├── node1.yml
+│       └── node2.yml
 ├── collections/
 │   ├── requirements.yml
 │   └── offline/
@@ -60,8 +65,6 @@ Corosync предоставляет членство и quorum. Pacemaker упр
 ├── MANUAL-INSTALLATION-RU.md
 └── roles/drbd9-pacemaker-corosync-nfs/
     ├── defaults/main.yml
-    ├── host_vars/
-    ├── inventory.ini
     ├── tasks/
     ├── templates/
     └── files/
@@ -90,8 +93,8 @@ ls -l /dev/disk/by-id/
 Текущие лабораторные пути находятся в:
 
 ```text
-roles/drbd9-pacemaker-corosync-nfs/host_vars/node1.yml
-roles/drbd9-pacemaker-corosync-nfs/host_vars/node2.yml
+inventory/host_vars/node1.yml
+inventory/host_vars/node2.yml
 ```
 
 Роль проверяет, что указанный путь существует и является блочным устройством.
@@ -266,6 +269,63 @@ umount /mnt/ha-nfs
 
 На стенде дополнительно проверена запись файла `ansible-test.txt` через VIP.
 
+## Проверка аварийного переключения под нагрузкой
+
+Тест выполнен с NFS-клиента при жёстком отключении активной `node1`.
+
+Монтирование NFS:
+
+```bash
+mkdir -p test
+mount -t nfs4 192.168.88.200:/ test
+```
+
+Непрерывная запись с контрольными суммами:
+
+```bash
+fio --name=nfs-ha-write \
+  --filename="$PWD/test/fio-ha-test.bin" \
+  --size=2G --rw=write --bs=1M --ioengine=sync --direct=1 \
+  --fsync=16 --time_based=1 --runtime=180 \
+  --verify=crc32c --do_verify=0 --group_reporting
+```
+
+Во время записи активная VM `node1` была выключена без штатного завершения ОС:
+
+```bash
+VBoxManage controlvm "altlinux 2" poweroff
+```
+
+Команда относится только к текущему стенду VirtualBox. На другом гипервизоре
+нужно использовать его механизм аварийного отключения активного узла.
+
+Результат переключения:
+
+- `node2` и `node3` сохранили quorum;
+- SBD завершил fencing отключённой `node1`;
+- DRBD стал `Primary` на `node2`;
+- обе XFS, NFS и VIP автоматически запустились на `node2`;
+- NFS-клиент не потребовал повторного монтирования;
+- FIO продолжил запись без I/O errors;
+- максимальная пауза одной операции составила около `93,6` секунды;
+- за 180 секунд записано `9293 MiB` со средней скоростью `51,6 MiB/s`.
+
+После переключения целостность файла проверена повторным чтением CRC:
+
+```bash
+fio --name=nfs-ha-verify \
+  --filename="$PWD/test/fio-ha-test.bin" \
+  --size=2G --rw=read --bs=1M --ioengine=sync --direct=1 \
+  --verify=crc32c --verify_only=1 --group_reporting
+```
+
+Проверка завершилась с `err=0`: прочитано и проверено `2048 MiB`. Итоговое
+состояние кластера: `node1` — `OFFLINE`, `node2` — DRBD `Primary` и активная
+NFS-группа, `node3` — diskless DRBD `Secondary` и участник quorum.
+
+Тестовые файлы `fio-ha-test.bin` и `failover-after.txt` оставлены на NFS. Возврат
+`node1` и повторная синхронизация DRBD выполняются отдельным тестом.
+
 ## Права NFS и root_squash
 
 Export создаётся с параметром `root_squash`. Пользователь `root` на клиенте не
@@ -307,6 +367,71 @@ ha_nfs_data_mode: "0777"
 - Не отключайте fencing и не устанавливайте `no-quorum-policy=ignore`.
 - Перед production необходимо отдельно проверить управляемый failover и поведение
   аппаратного watchdog.
+
+## Материалы для изучения
+
+Рекомендуемый порядок изучения стека:
+
+1. **Pacemaker** — ресурсы, группы, promotable clones, constraints, quorum,
+   fencing и resource stickiness:
+   [Pacemaker Explained 3.0](https://clusterlabs.org/projects/pacemaker/doc/3.0/Pacemaker_Explained/pdf/Pacemaker_Explained.pdf).
+2. **DRBD 9** — роли Primary/Secondary, репликация, синхронизация, quorum,
+   split-brain и интеграция с Pacemaker:
+   [DRBD 9 User's Guide](https://linbit.com/drbd-user-guide/drbd-guide-9_0-en/).
+   Для этого проекта особенно важна глава 9 об интеграции с Pacemaker.
+3. **Corosync** — членство узлов, обмен сообщениями и quorum:
+   [официальная документация Corosync](https://corosync.github.io/).
+4. **SBD и watchdog** — самозащита узла, watchdog-only режим и fencing:
+   [официальная документация SBD](https://github.com/ClusterLabs/sbd/blob/main/man/sbd.8.pod.in).
+
+Команды для изучения текущей конфигурации Pacemaker:
+
+```bash
+pcs status --full
+pcs resource config
+pcs constraint config --full
+pcs property config
+pcs resource defaults
+pcs config
+cibadmin --query | less
+```
+
+Описание используемых resource agents:
+
+```bash
+pcs resource describe ocf:linbit:drbd
+pcs resource describe ocf:heartbeat:Filesystem
+pcs resource describe ocf:heartbeat:nfsserver
+pcs resource describe ocf:heartbeat:exportfs
+pcs resource describe ocf:heartbeat:IPaddr2
+```
+
+Диагностика DRBD:
+
+```bash
+drbdadm status ha_nfs
+drbdsetup status --verbose --statistics
+cat /proc/drbd
+man drbdadm
+man drbdsetup
+man drbd.conf-9.0
+```
+
+Диагностика Corosync и SBD:
+
+```bash
+corosync-quorumtool -s
+corosync-cfgtool -s
+corosync-cmapctl | less
+journalctl -u corosync
+systemctl status sbd
+journalctl -u sbd
+man sbd
+```
+
+Команды `sbd test-watchdog` и ручное управление ролями DRBD нельзя запускать на
+работающем кластере без отдельного тестового сценария: они могут вызвать
+перезагрузку узла или конфликт с Pacemaker.
 
 Подробная ручная последовательность находится в
 [`MANUAL-INSTALLATION-RU.md`](MANUAL-INSTALLATION-RU.md).

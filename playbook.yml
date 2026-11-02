@@ -1,4 +1,18 @@
 ---
+# Доступные этапы:
+#
+# step1 — установить пакеты, создать LVM и настроить DRBD.
+# Создание хранилища требует явного подтверждения:
+# ansible-playbook playbook.yml --tags step1 \
+#   -e ha_nfs_storage_initialize=true
+#
+# После полной синхронизации DRBD:
+# step2 — создать XFS и настроить watchdog, SBD, Corosync,
+# Pacemaker, NFS и VIP.
+# ansible-playbook playbook.yml --tags step2
+#
+# Запуск без тегов ничего не изменяет.
+
 - name: Развернуть отказоустойчивый NFS-кластер
   hosts: cluster
   become: true
