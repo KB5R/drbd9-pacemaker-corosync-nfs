@@ -1,21 +1,4 @@
 ---
-- name: Найти конфигурацию репозиториев ALT
-  ansible.builtin.find:
-    paths: /etc/apt
-    patterns: "*.list"
-    recurse: true
-    file_type: file
-  register: alt_repository_files
-
-- name: Отключить установочный CD-ROM репозиторий
-  ansible.builtin.replace:
-    path: "{{ item.path }}"
-    regexp: '^(rpm\s+cdrom:.*)$'
-    replace: '# \1'
-  loop: "{{ alt_repository_files.files }}"
-  loop_control:
-    label: "{{ item.path }}"
-
 - name: Установить пакеты кластера
   community.general.apt_rpm:
     package: "{{ ha_nfs_cluster_packages }}"
