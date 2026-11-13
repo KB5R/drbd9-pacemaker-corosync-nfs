@@ -1,4 +1,10 @@
 ---
+- name: Перегенерировать machineid клонированных VM
+  ansible.builtin.import_tasks: identity.yml
+  tags:
+    - never
+    - identity
+
 - name: Установить пакеты
   ansible.builtin.import_tasks: packages.yml
   tags:

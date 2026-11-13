@@ -1,0 +1,14 @@
+---
+# Одноразовая перегенерация machine-id на клонированных VM:
+# ansible-playbook prepare.yml --tags identity
+#
+# После выполнения необходимо перезагрузить узлы.
+
+- name: Перегенерировать machine-id узлов
+  hosts: cluster
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+
+  roles:
+    - role: drbd9-pacemaker-corosync-nfs

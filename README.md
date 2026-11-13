@@ -51,6 +51,7 @@ Corosync предоставляет членство и quorum. Pacemaker упр
 .
 ├── ansible.cfg
 ├── playbook.yml
+├── prepare.yml
 ├── inventory/
 │   ├── inventory.ini
 │   └── host_vars/
@@ -82,6 +83,19 @@ Corosync предоставляет членство и quorum. Pacemaker упр
 4. Добавить отдельный data-диск только на `node1` и `node2`.
 5. Указать диски через постоянные пути `/dev/disk/by-id/`.
 6. Проверить, что VIP `192.168.88.200` не используется другим устройством.
+
+Для клонированных VM `machine-id` можно один раз перегенерировать отдельным
+playbook. Он не запускает настройку хранилища или кластера:
+
+```bash
+ansible-playbook prepare.yml --tags identity
+ansible cluster -m ansible.builtin.reboot
+ansible cluster -m ansible.builtin.ping
+```
+
+Тег `identity` нельзя запускать повторно: он создаёт новый `machine-id` при
+каждом выполнении. Playbook не предназначен для работающих production-узлов:
+их системную идентичность изменять нельзя.
 
 Пример проверки дисков:
 

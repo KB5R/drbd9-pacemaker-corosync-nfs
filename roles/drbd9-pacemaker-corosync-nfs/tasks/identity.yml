@@ -1,0 +1,12 @@
+---
+# Одноразовая подготовка клонированных VM. Повторный запуск изменит machine-id.
+- name: Перегенерировать machine-id
+  ansible.builtin.shell: |
+    set -o errexit -o nounset -o pipefail
+    machine_id="$(dbus-uuidgen)"
+    printf '%s\n' "$machine_id" > /etc/machine-id
+    printf '%s\n' "$machine_id" > /var/lib/dbus/machine-id
+  args:
+    executable: /bin/bash
+  changed_when: true
+  no_log: true

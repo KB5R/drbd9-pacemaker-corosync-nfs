@@ -1,4 +1,25 @@
 ---
+- name: Загрузить модуль ядра DRBD
+  community.general.modprobe:
+    name: drbd
+    state: present
+
+- name: Получить версию загруженного DRBD
+  ansible.builtin.command:
+    argv:
+      - cat
+      - /sys/module/drbd/version
+  register: drbd_kernel_version
+  changed_when: false
+
+- name: Проверить версию загруженного DRBD
+  ansible.builtin.assert:
+    that:
+      - drbd_kernel_version.stdout is version('9.0', '>=')
+    fail_msg: >-
+      Загружен DRBD {{ drbd_kernel_version.stdout }}. Перезагрузите узел с ядром,
+      для которого установлен пакет kernel-modules-drbd9-6.12.
+
 - name: Настроить ресурс DRBD
   ansible.builtin.template:
     src: ha_nfs.res.j2
